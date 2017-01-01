@@ -1,0 +1,209 @@
+  /*
+   1MB flash sizee
+   sonoff header
+   1 - vcc 3v3
+   2 - rx
+   3 - tx
+   4 - gnd
+   5 - gpio 14
+   esp8266 connections
+   gpio  0 - button
+   gpio 12 - relay
+   gpio 13 - green led - active low
+   gpio 14 - pin 5 on header
+*/
+
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+#include "appconfig.h"
+#include "wificonfig.h"
+#include <Pushbutton.h>
+#include <EventManager.h>
+
+char versionText[] = "IOT Power Board v1.0";
+
+/* ----------------------------------------------------------- */
+
+#define SONOFF_BUTTON    0
+#define SONOFF_RELAY    12
+#define SONOFF_LED      13
+#define SONOFF_INPUT    14
+
+#define BUTTON          0
+#define EXT_BUTTON      14
+#define RELAY           12
+#define LED_PIN         13
+#define LED_ON          LOW
+#define LED_OFF         HIGH
+
+// https://github.com/igormiktor/arduino-EventManager/blob/master/EventManager/EventManager.h
+EventManager sEM;
+
+#define CH_EXT_SWITCH   0
+#define CH_BUTTON       1
+#define CH_RELAY        2
+
+struct Channel {
+    int index;
+    int state;
+    int eventCode;
+};
+
+Channel ch[10] {
+    {
+        CH_EXT_SWITCH,
+        1,
+        EventManager::kEventUser0
+    },
+    {
+        CH_BUTTON,
+        1,
+        EventManager::kEventUser1
+    },
+    {
+        CH_RELAY,
+        1,
+        0
+    }
+};
+
+
+/* ----------------------------------------------------------- */
+
+WiFiServer server(80);
+
+// https://github.com/pololu/pushbutton-arduino
+Pushbutton button(SONOFF_BUTTON);
+Pushbutton extSwitch(EXT_BUTTON);
+
+int val = 0;
+int extSwVal = 1;
+
+/* ----------------------------------------------------------- */
+
+void setup() {
+
+    Serial.begin(9600);
+    delay(100);
+    Serial.println("Booting");
+    Serial.println(versionText);
+
+    setupOTA("SonoffBase");
+
+    server.begin();
+    Serial.println("Server started on port 80");
+
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LED_OFF);
+
+    pinMode(RELAY, OUTPUT);
+    digitalWrite(RELAY, 0);
+    
+    Serial.println("Ready");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    sEM.addListener(ch[CH_EXT_SWITCH].eventCode, listener_ExtSwitch);
+    sEM.addListener(ch[CH_BUTTON].eventCode, listener_Button);
+}
+
+/* ----------------------------------------------------------- */
+
+void loop() {
+
+    delay(100);
+    
+    ArduinoOTA.handle();
+    
+    serviceEvent(CH_EXT_SWITCH);
+    serviceEvent(CH_BUTTON);
+
+    sEM.processEvent();
+}
+
+void serviceEvent(int st) {
+
+    switch (st) {
+        case CH_EXT_SWITCH: {
+            int state = extSwitch.isPressed();
+            if (ch[CH_EXT_SWITCH].state != state) {
+                Serial.println("CH_EXT_SWITCH state changed");
+                sEM.queueEvent(ch[CH_EXT_SWITCH].eventCode, state);
+            }
+            }
+            break;  
+        case CH_BUTTON: {
+            if (button.getSingleDebouncedRelease()) {
+                Serial.println("CH_BUTTON getSingleDebouncedRelease");
+                ch[CH_BUTTON].state = val;
+                sEM.queueEvent(ch[CH_BUTTON].eventCode, val);
+            }
+        }
+            break;  
+    }
+}
+
+void listener_ExtSwitch(int event, int state) {
+    Serial.print("Ext Switch listener: "); Serial.println(state);
+    ch[CH_EXT_SWITCH].state = state;
+    setRelay(state);
+}
+
+void listener_Button(int event, int state) {
+    Serial.print("Button listener: "); Serial.println(state);
+    toggleRelay();
+}
+
+void setLED(int val) {
+    digitalWrite(LED_PIN, !val);
+}
+
+void setRelay(int val) {
+    digitalWrite(RELAY, val);
+    setLED(val);
+}
+
+void toggleRelay() {
+    if (ch[CH_RELAY].state == 1) {
+        ch[CH_RELAY].state = 0;
+    }
+    else {
+        ch[CH_RELAY].state = 1;
+    }
+    setRelay(ch[CH_RELAY].state);
+}
+
+void setupOTA(char* host) {
+    
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+        Serial.println("Connection Failed! Rebooting...");
+        delay(5000);
+        ESP.restart();
+    }
+    
+    ArduinoOTA.setHostname(host);
+    ArduinoOTA.onStart([]() {
+        Serial.println("Start");
+    });
+    ArduinoOTA.onEnd([]() {
+        Serial.println("\nEnd");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+        else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
+
+    ArduinoOTA.begin();
+}
