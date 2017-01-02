@@ -87,11 +87,11 @@ int extSwVal = 1;
 void setup() {
 
     Serial.begin(9600);
-    delay(100);
+    delay(200);
     Serial.println("Booting");
     Serial.println(versionText);
 
-    setupOTA("SonoffBase");
+    setupOTA("IOTPowerBoard");
 
     server.begin();
     Serial.println("Server started on port 80");
@@ -108,6 +108,9 @@ void setup() {
 
     sEM.addListener(ch[CH_EXT_SWITCH].eventCode, listener_ExtSwitch);
     sEM.addListener(ch[CH_BUTTON].eventCode, listener_Button);
+
+    ch[CH_RELAY].state = 0;     // off
+    setRelay(ch[CH_RELAY].state);
 }
 
 /* ----------------------------------------------------------- */
@@ -128,28 +131,25 @@ void serviceEvent(int st) {
 
     switch (st) {
         case CH_EXT_SWITCH: {
-            int state = extSwitch.isPressed();
-            if (ch[CH_EXT_SWITCH].state != state) {
+            if (extSwitch.getSingleDebouncedRelease()) {
                 Serial.println("CH_EXT_SWITCH state changed");
-                sEM.queueEvent(ch[CH_EXT_SWITCH].eventCode, state);
+                sEM.queueEvent(ch[CH_EXT_SWITCH].eventCode, 0);
             }
             }
             break;  
         case CH_BUTTON: {
             if (button.getSingleDebouncedRelease()) {
                 Serial.println("CH_BUTTON getSingleDebouncedRelease");
-                ch[CH_BUTTON].state = val;
-                sEM.queueEvent(ch[CH_BUTTON].eventCode, val);
+                sEM.queueEvent(ch[CH_BUTTON].eventCode, 0);
             }
-        }
+            }
             break;  
     }
 }
 
 void listener_ExtSwitch(int event, int state) {
     Serial.print("Ext Switch listener: "); Serial.println(state);
-    ch[CH_EXT_SWITCH].state = state;
-    setRelay(state);
+    toggleRelay();
 }
 
 void listener_Button(int event, int state) {
