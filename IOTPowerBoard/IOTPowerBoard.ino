@@ -1,4 +1,4 @@
-  /*
+/*
    1MB flash sizee
    sonoff header
    1 - vcc 3v3
@@ -23,7 +23,7 @@
 #include <Pushbutton.h>
 #include <EventManager.h>
 
-char versionText[] = "IOT Power Board v1.0";
+char versionText[] = "IOT Power Board v1.1.0";
 
 /* ----------------------------------------------------------- */
 
@@ -45,6 +45,8 @@ EventManager sEM;
 #define CH_EXT_SWITCH   0
 #define CH_BUTTON       1
 #define CH_RELAY        2
+#define CH_TIMEOUT      3
+
 
 struct Channel {
     int index;
@@ -67,9 +69,17 @@ Channel ch[10] {
         CH_RELAY,
         1,
         0
+    },
+    {
+        CH_TIMEOUT,
+        0,
+        EventManager::kEventUser2
     }
 };
 
+#define SECONDS     1000        // ms
+#define MINUTES     60*SECONDS
+long timedPeriod = 5 * MINUTES;
 
 /* ----------------------------------------------------------- */
 
@@ -123,6 +133,7 @@ void loop() {
     
     serviceEvent(CH_EXT_SWITCH);
     serviceEvent(CH_BUTTON);
+    serviceEvent(CH_TIMEOUT);
 
     sEM.processEvent();
 }
@@ -134,6 +145,13 @@ void serviceEvent(int st) {
             if (extSwitch.getSingleDebouncedRelease()) {
                 Serial.println("CH_EXT_SWITCH state changed");
                 sEM.queueEvent(ch[CH_EXT_SWITCH].eventCode, 0);
+                if (ch[CH_RELAY].state == 1) {
+                    sEM.removeListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
+                    Serial.println("Removed listener_TimeOut");
+                } else {
+                    sEM.addListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
+                    ch[CH_TIMEOUT].state = millis() + timedPeriod;
+                }
             }
             }
             break;  
@@ -144,6 +162,13 @@ void serviceEvent(int st) {
             }
             }
             break;  
+        case CH_TIMEOUT: {
+            if (sEM.isListenerEnabled(ch[CH_TIMEOUT].eventCode, listener_TimeOut)) {
+                if (millis() > ch[CH_TIMEOUT].state) {
+                    sEM.queueEvent(ch[CH_TIMEOUT].eventCode, 0);
+                }
+            }
+        }
     }
 }
 
@@ -157,13 +182,21 @@ void listener_Button(int event, int state) {
     toggleRelay();
 }
 
+void listener_TimeOut(int event, int state) {
+    Serial.println("Timed out");
+    setRelay(0);
+    sEM.removeListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
+}
+
 void setLED(int val) {
     digitalWrite(LED_PIN, !val);
 }
 
 void setRelay(int val) {
+    ch[CH_RELAY].state = val;
     digitalWrite(RELAY, val);
     setLED(val);
+    Serial.print("Setting relay: "); Serial.println(val);
 }
 
 void toggleRelay() {
