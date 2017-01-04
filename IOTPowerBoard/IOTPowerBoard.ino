@@ -20,8 +20,9 @@
 #include <ArduinoOTA.h>
 #include "appconfig.h"
 #include "wificonfig.h"
-#include <Pushbutton.h>
+//#include <Pushbutton.h>
 #include <EventManager.h>
+#include <myPushButton.h>
 
 char versionText[] = "IOT Power Board v1.1.0";
 
@@ -83,16 +84,43 @@ long timedPeriod = 5 * MINUTES;
 
 /* ----------------------------------------------------------- */
 
+void listener(int eventCode, int eventParams);
+void extSwitch_Listener(int eventCode, int eventParams);
+
 WiFiServer server(80);
 
 // https://github.com/pololu/pushbutton-arduino
-Pushbutton button(SONOFF_BUTTON);
-Pushbutton extSwitch(EXT_BUTTON);
+
+//myPushButton button(SONOFF_BUTTON, true, 2000, 1, listener);
+myPushButton extSwitch(EXT_BUTTON, true, 2000, 1, extSwitch_Listener);
 
 int val = 0;
 int extSwVal = 1;
+bool hasBeenReleased = true;
 
 /* ----------------------------------------------------------- */
+
+void extSwitch_Listener(int eventCode, int eventParams) {
+
+    switch (eventParams) {
+        
+        case extSwitch.EV_BUTTON_PRESSED:     
+            sEM.queueEvent(ch[CH_EXT_SWITCH].eventCode, eventParams);
+            sEM.removeListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
+            Serial.println("Removed listener_TimeOut");
+            break;          
+        
+        case extSwitch.EV_HELD_FOR_LONG_ENOUGH:
+            sEM.queueEvent(ch[CH_EXT_SWITCH].eventCode, eventParams);
+            sEM.addListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
+            ch[CH_TIMEOUT].state = millis() + timedPeriod;
+            break;
+        
+        case extSwitch.EV_RELEASED:
+            sEM.queueEvent(ch[CH_EXT_SWITCH].eventCode, eventParams);
+            break;
+    }
+}
 
 void setup() {
 
@@ -116,8 +144,8 @@ void setup() {
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
 
-    sEM.addListener(ch[CH_EXT_SWITCH].eventCode, listener_ExtSwitch);
-    sEM.addListener(ch[CH_BUTTON].eventCode, listener_Button);
+    //sEM.addListener(ch[CH_EXT_SWITCH].eventCode, listener_ExtSwitch);
+    //sEM.addListener(ch[CH_BUTTON].eventCode, listener_Button);
 
     ch[CH_RELAY].state = 0;     // off
     setRelay(ch[CH_RELAY].state);
@@ -131,8 +159,7 @@ void loop() {
     
     ArduinoOTA.handle();
     
-    serviceEvent(CH_EXT_SWITCH);
-    serviceEvent(CH_BUTTON);
+    //serviceEvent(CH_EXT_SWITCH);
     serviceEvent(CH_TIMEOUT);
 
     sEM.processEvent();
@@ -140,9 +167,12 @@ void loop() {
 
 void serviceEvent(int st) {
 
+    bool relayOn = ch[CH_RELAY].state == 1;
+
     switch (st) {
-        case CH_EXT_SWITCH: {
-            if (extSwitch.getSingleDebouncedRelease()) {
+        /*case CH_EXT_SWITCH: {
+            if (extSwitch.isHeld()) {
+                hasBeenReleased = false;
                 Serial.println("CH_EXT_SWITCH state changed");
                 sEM.queueEvent(ch[CH_EXT_SWITCH].eventCode, 0);
                 if (ch[CH_RELAY].state == 1) {
@@ -152,16 +182,11 @@ void serviceEvent(int st) {
                     sEM.addListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
                     ch[CH_TIMEOUT].state = millis() + timedPeriod;
                 }
+            } else if (extSwitch.isReleased()) {
+                hasBeenReleased = true;
             }
             }
-            break;  
-        case CH_BUTTON: {
-            if (button.getSingleDebouncedRelease()) {
-                Serial.println("CH_BUTTON getSingleDebouncedRelease");
-                sEM.queueEvent(ch[CH_BUTTON].eventCode, 0);
-            }
-            }
-            break;  
+            break;  */
         case CH_TIMEOUT: {
             if (sEM.isListenerEnabled(ch[CH_TIMEOUT].eventCode, listener_TimeOut)) {
                 if (millis() > ch[CH_TIMEOUT].state) {
@@ -172,15 +197,31 @@ void serviceEvent(int st) {
     }
 }
 
-void listener_ExtSwitch(int event, int state) {
+/* void listener_ExtSwitch(int event, int state) {
     Serial.print("Ext Switch listener: "); Serial.println(state);
-    toggleRelay();
-}
+    
+    switch (state) {
+        case extSwitch.EV_BUTTON_PRESSED:
+            if (ch[CH_RELAY].state == 1) {
+                setRelay(0);
+            }
+            break;
+        case extSwitch.EV_HELD_FOR_LONG_ENOUGH:
+            if (ch[CH_RELAY].state == 0) {
+                setRelay(1);
+            } else {
+                setRelay(0);
+            }
+            break;
+        case extSwitch.EV_RELEASED:
+            break;
+    }
+} */
 
-void listener_Button(int event, int state) {
+/* void listener_Button(int event, int state) {
     Serial.print("Button listener: "); Serial.println(state);
     toggleRelay();
-}
+}*/
 
 void listener_TimeOut(int event, int state) {
     Serial.println("Timed out");
