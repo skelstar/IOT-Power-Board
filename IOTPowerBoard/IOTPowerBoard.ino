@@ -93,6 +93,7 @@ void listener_Button(int eventCode, int eventParams) {
         
         case button.EV_BUTTON_PRESSED:     
             sEM.removeListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
+            setRelay(0);
             Serial.println("Removed listener_TimeOut");
             Serial.println("EV_BUTTON_PRESSED");
             break;          
@@ -151,6 +152,8 @@ void loop() {
     
     button.serviceEvents();
     serviceEvents(CH_TIMEOUT);
+
+    delay(50);
 }
 
 /* ----------------------------------------------------------- */
