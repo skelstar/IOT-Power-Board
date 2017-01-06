@@ -39,7 +39,6 @@ char versionText[] = "IOT Power Board v1.2.0";
 #define LED_ON          LOW
 #define LED_OFF         HIGH
 
-// https://github.com/igormiktor/arduino-EventManager/blob/master/EventManager/EventManager.h
 EventManager sEM;
 
 #define CH_EXT_SWITCH   0
@@ -54,17 +53,8 @@ struct Channel {
     int eventCode;
 };
 
-Channel ch[10] {
-    {
-        CH_EXT_SWITCH,
-        1,
-        EventManager::kEventUser0
-    },
-    {
-        CH_BUTTON,
-        1,
-        EventManager::kEventUser1
-    },
+Channel ch[10] 
+{
     {
         CH_RELAY,
         1,
@@ -110,6 +100,7 @@ void listener_Button(int eventCode, int eventParams) {
         case button.EV_HELD_FOR_LONG_ENOUGH:
             sEM.addListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
             ch[CH_TIMEOUT].state = millis() + timedPeriod;
+            setRelay(1);
             Serial.println("EV_HELD_FOR_LONG_ENOUGH");
             break;
         
