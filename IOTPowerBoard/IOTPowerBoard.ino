@@ -23,7 +23,7 @@
 #include <EventManager.h>
 #include <myPushButton.h>
 
-char versionText[] = "IOT Power Board v1.2.0";
+char versionText[] = "IOT Power Board v1.2.1";
 
 /* ----------------------------------------------------------- */
 
@@ -106,6 +106,7 @@ void listener_Button(int eventCode, int eventParams) {
             break;
         
         case button.EV_RELEASED:
+            Serial.println("EV_RELEASED");
             break;
     }
 }
@@ -153,7 +154,7 @@ void loop() {
     button.serviceEvents();
     serviceEvents(CH_TIMEOUT);
 
-    delay(50);
+    delay(100);
 }
 
 /* ----------------------------------------------------------- */
