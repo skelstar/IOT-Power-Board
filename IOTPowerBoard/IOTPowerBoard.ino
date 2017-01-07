@@ -22,8 +22,13 @@
 #include "wificonfig.h"
 #include <EventManager.h>
 #include <myPushButton.h>
+// MQTT
+#include "Adafruit_MQTT.h"
+#include "Adafruit_MQTT_Client.h"
 
-char versionText[] = "IOT Power Board v1.2.1";
+/* ----------------------------------------------------------- */
+
+char versionText[] = "IOT Power Board v1.3.0";
 
 /* ----------------------------------------------------------- */
 
@@ -71,13 +76,18 @@ Channel ch[10]
 #define MINUTES     60*SECONDS
 long timedPeriod = 5 * MINUTES;
 
+
+WiFiClient client;
+
+Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_USERNAME, AIO_KEY);
+
+Adafruit_MQTT_Publish iotPowerBoardLog = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/IOTPowerBoardLog");
+
 /* ----------------------------------------------------------- */
 
 void listener_Button(int eventCode, int eventParams);
 
 /* ----------------------------------------------------------- */
-
-WiFiServer server(80);
 
 myPushButton button(EXT_BUTTON, true, 2000, 1, listener_Button);
 
@@ -91,11 +101,11 @@ void listener_Button(int eventCode, int eventParams) {
 
     switch (eventParams) {
         
-        case button.EV_BUTTON_PRESSED:     
-            sEM.removeListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
+        case button.EV_BUTTON_PRESSED:
             setRelay(0);
-            Serial.println("Removed listener_TimeOut");
+            sEM.removeListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
             Serial.println("EV_BUTTON_PRESSED");
+            logMessage("EV_BUTTON_PRESSED");
             break;          
         
         case button.EV_HELD_FOR_LONG_ENOUGH:
@@ -103,10 +113,13 @@ void listener_Button(int eventCode, int eventParams) {
             ch[CH_TIMEOUT].state = millis() + timedPeriod;
             setRelay(1);
             Serial.println("EV_HELD_FOR_LONG_ENOUGH");
+            logMessage("EV_HELD_FOR_LONG_ENOUGH");
             break;
         
         case button.EV_RELEASED:
             Serial.println("EV_RELEASED");
+            logMessage("EV_RELEASED");
+
             break;
     }
 }
@@ -118,6 +131,16 @@ void listener_TimeOut(int event, int state) {
     sEM.removeListener(ch[CH_TIMEOUT].eventCode, listener_TimeOut);
 }
 
+void logMessage(char* message) {
+
+    if (! iotPowerBoardLog.publish(message)) {
+        Serial.println(F("Failed"));
+    } else {
+        Serial.println(F("OK!"));
+    }
+}
+
+
 /* ------------------------------------------------------------- */
 
 void setup() {
@@ -127,9 +150,9 @@ void setup() {
     Serial.println("Booting");
     Serial.println(versionText);
 
-    setupOTA("IOTPowerBoard");
+    setupWifi();
 
-    server.begin();
+    setupOTA("IOTPowerBoard");
 
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LED_OFF);
@@ -148,6 +171,8 @@ void setup() {
 /* ----------------------------------------------------------- */
 
 void loop() {
+
+    MQTT_connect();
 
     ArduinoOTA.handle();
     
@@ -196,8 +221,34 @@ void toggleRelay() {
     setRelay(ch[CH_RELAY].state);
 }
 
-void setupOTA(char* host) {
-    
+void MQTT_connect() {
+
+    int8_t ret;
+
+    // Stop if already connected.
+    if (mqtt.connected()) {
+        return;
+    }
+
+    Serial.print("Connecting to MQTT... ");
+
+    uint8_t retries = 3;
+    while ((ret = mqtt.connect()) != 0) {       // connect will return 0 for connected
+        Serial.println(mqtt.connectErrorString(ret));
+        Serial.println("Retrying MQTT connection in 5 seconds...");
+        mqtt.disconnect();
+        delay(5000);  // wait 5 seconds
+        retries--;
+        if (retries == 0) {
+            // basically die and wait for WDT to reset me
+            while (1);
+        }
+    }
+    Serial.println("MQTT Connected!");
+}
+
+void setupWifi() {
+
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
     while (WiFi.waitForConnectResult() != WL_CONNECTED) {
@@ -205,6 +256,9 @@ void setupOTA(char* host) {
         delay(5000);
         ESP.restart();
     }
+}
+
+void setupOTA(char* host) {
     
     ArduinoOTA.setHostname(host);
     ArduinoOTA.onStart([]() {
