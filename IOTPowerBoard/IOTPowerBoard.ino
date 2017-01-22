@@ -13,22 +13,20 @@
    gpio 14 - pin 5 on header
 */
 
-#include <Arduino.h>
-#include <ESP8266WiFi.h>
-#include <ESP8266mDNS.h>
-#include <WiFiUdp.h>
-#include <ArduinoOTA.h>
 #include "appconfig.h"
-#include "wificonfig.h"
 #include <EventManager.h>
 #include <myPushButton.h>
-// MQTT
-#include "Adafruit_MQTT.h"
-#include "Adafruit_MQTT_Client.h"
+#include <myWifiHelper.h>
 
 /* ----------------------------------------------------------- */
 
-char versionText[] = "IOT Power Board v1.3.0";
+char versionText[] = "IOT Power Board v1.4.0";
+
+#define HOSTNAME "IOT-Power-Board"
+
+MyWifiHelper wifiHelper(HOSTNAME);
+
+#define     FEED_IOTPOWERBOARD  "dev/iot-power-board"
 
 /* ----------------------------------------------------------- */
 
@@ -76,13 +74,6 @@ Channel ch[10]
 #define MINUTES     60*SECONDS
 long timedPeriod = 5 * MINUTES;
 
-
-WiFiClient client;
-
-Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_USERNAME, AIO_KEY);
-
-Adafruit_MQTT_Publish iotPowerBoardLog = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/IOTPowerBoardLog");
-
 /* ----------------------------------------------------------- */
 
 void listener_Button(int eventCode, int eventParams);
@@ -94,6 +85,51 @@ myPushButton button(EXT_BUTTON, true, 2000, 1, listener_Button);
 int val = 0;
 int extSwVal = 1;
 bool hasBeenReleased = true;
+
+/* ----------------------------------------------------------- */
+
+void listener_Button(int eventCode, int eventParams);
+void listener_TimeOut(int event, int state);
+void logMessage(char* message);
+
+/* ------------------------------------------------------------- */
+
+void setup() {
+
+    Serial.begin(9600);
+    delay(200);
+    Serial.println("Booting");
+    Serial.println(versionText);
+
+    wifiHelper.setupWifi();
+
+    wifiHelper.setupOTA(HOSTNAME);
+
+    wifiHelper.setupMqtt();
+
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LED_OFF);
+
+    pinMode(RELAY, OUTPUT);
+    digitalWrite(RELAY, 1);     // turn ON by default (incase it doens't work good)
+
+    ch[CH_RELAY].state = 1;     // off
+    setRelay(ch[CH_RELAY].state);
+}
+
+/* ----------------------------------------------------------- */
+
+void loop() {
+
+    wifiHelper.loopMqtt();
+
+    ArduinoOTA.handle();
+    
+    button.serviceEvents();
+    serviceEvents(CH_TIMEOUT);
+
+    delay(20);
+}
 
 /* ----------------------------------------------------------- */
 
@@ -119,7 +155,6 @@ void listener_Button(int eventCode, int eventParams) {
         case button.EV_RELEASED:
             Serial.println("EV_RELEASED");
             logMessage("EV_RELEASED");
-
             break;
     }
 }
@@ -133,56 +168,8 @@ void listener_TimeOut(int event, int state) {
 
 void logMessage(char* message) {
 
-    if (! iotPowerBoardLog.publish(message)) {
-        Serial.println(F("Failed"));
-    } else {
-        Serial.println(F("OK!"));
-    }
+    wifiHelper.mqttPublish(FEED_IOTPOWERBOARD, message);
 }
-
-
-/* ------------------------------------------------------------- */
-
-void setup() {
-
-    Serial.begin(9600);
-    delay(200);
-    Serial.println("Booting");
-    Serial.println(versionText);
-
-    setupWifi();
-
-    setupOTA("IOTPowerBoard");
-
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LED_OFF);
-
-    pinMode(RELAY, OUTPUT);
-    digitalWrite(RELAY, 0);
-    
-    Serial.println("Ready");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-
-    ch[CH_RELAY].state = 0;     // off
-    setRelay(ch[CH_RELAY].state);
-}
-
-/* ----------------------------------------------------------- */
-
-void loop() {
-
-    MQTT_connect();
-
-    ArduinoOTA.handle();
-    
-    button.serviceEvents();
-    serviceEvents(CH_TIMEOUT);
-
-    delay(100);
-}
-
-/* ----------------------------------------------------------- */
 
 void serviceEvents(int st) {
 
@@ -219,65 +206,4 @@ void toggleRelay() {
         ch[CH_RELAY].state = 1;
     }
     setRelay(ch[CH_RELAY].state);
-}
-
-void MQTT_connect() {
-
-    int8_t ret;
-
-    // Stop if already connected.
-    if (mqtt.connected()) {
-        return;
-    }
-
-    Serial.print("Connecting to MQTT... ");
-
-    uint8_t retries = 3;
-    while ((ret = mqtt.connect()) != 0) {       // connect will return 0 for connected
-        Serial.println(mqtt.connectErrorString(ret));
-        Serial.println("Retrying MQTT connection in 5 seconds...");
-        mqtt.disconnect();
-        delay(5000);  // wait 5 seconds
-        retries--;
-        if (retries == 0) {
-            // basically die and wait for WDT to reset me
-            while (1);
-        }
-    }
-    Serial.println("MQTT Connected!");
-}
-
-void setupWifi() {
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-    while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-        Serial.println("Connection Failed! Rebooting...");
-        delay(5000);
-        ESP.restart();
-    }
-}
-
-void setupOTA(char* host) {
-    
-    ArduinoOTA.setHostname(host);
-    ArduinoOTA.onStart([]() {
-        Serial.println("OTA Start");
-    });
-    ArduinoOTA.onEnd([]() {
-        Serial.println("\nOTA End");
-    });
-    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-    });
-    ArduinoOTA.onError([](ota_error_t error) {
-        Serial.printf("Error[%u]: ", error);
-        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-        else if (error == OTA_END_ERROR) Serial.println("End Failed");
-    });
-
-    ArduinoOTA.begin();
 }
