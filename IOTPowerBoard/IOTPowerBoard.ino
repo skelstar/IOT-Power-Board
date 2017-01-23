@@ -20,7 +20,7 @@
 
 /* ----------------------------------------------------------- */
 
-char versionText[] = "IOT Power Board v1.4.0";
+char versionText[] = "IOT Power Board v1.4.1";
 
 #define HOSTNAME "IOT-Power-Board"
 
@@ -101,12 +101,6 @@ void setup() {
     Serial.println("Booting");
     Serial.println(versionText);
 
-    wifiHelper.setupWifi();
-
-    wifiHelper.setupOTA(HOSTNAME);
-
-    wifiHelper.setupMqtt();
-
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LED_OFF);
 
@@ -115,6 +109,19 @@ void setup() {
 
     ch[CH_RELAY].state = 1;     // off
     setRelay(ch[CH_RELAY].state);
+
+    button.serviceEvents();     // make sure we can turn the power board off during [wifi] startup
+
+    wifiHelper.setupWifi();
+
+    button.serviceEvents();
+
+    wifiHelper.setupOTA(HOSTNAME);
+
+    button.serviceEvents();
+
+    wifiHelper.setupMqtt();
+
 }
 
 /* ----------------------------------------------------------- */
